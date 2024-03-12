@@ -1,0 +1,47 @@
+image: maven:3.8.3-jdk-11
+services:
+  - docker:19.03.7-dind
+stages:          
+  - compile
+  - build
+  - deploy
+compile-job:      
+  stage: compile
+  tags:
+    - "test-self"
+  script:
+    - echo "Compiling the code..."
+    - mvn clean install -Dspring.profiles.active=$java && mvn package -B -e -Dspring.profiles.active=$java
+  artifacts:
+    paths:
+      - target/*.war
+build-job:   
+  stage: build
+  tags:
+    - "test-self"    
+  script:
+    - echo "Maven Build"
+    - mvn clean package
+deploy-job:      
+  stage: deploy
+  tags:
+    - "test-self"  
+  before_script:
+   - 'command -v ssh-agent >/dev/null || ( apk add --update openssh )' 
+   - eval $(ssh-agent -s)
+   - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+   - mkdir -p ~/.ssh
+   - chmod 700 ~/.ssh
+   - ssh-keyscan $EC2_IPADDRESS >> ~/.ssh/known_hosts
+   - chmod 644 ~/.ssh/known_hosts
+  script:
+      - ssh $SSH_USER@$EC2_IPADDRESS "sudo mkdir -p /myapp"
+      - ssh $SSH_USER@$EC2_IPADDRESS "ls -ld /myapp"
+      - ssh $SSH_USER@$EC2_IPADDRESS "sudo chown -R ubuntu:ubuntu /myapp"
+      - ssh $SSH_USER@$EC2_IPADDRESS "ls -ld /myapp" 
+      - scp target/*.war $SSH_USER@$EC2_IPADDRESS:/myapp
+      - docker build -t nayak462/pet:latest . 
+      - echo $DOCKER_PASS | docker login -u nayak462 --password-stdin 
+      - docker push nayak462/pet:latest 
+      - docker pull nayak462/pet:latest
+      - docker run -d --name petclinic -p 8080:8090 nayak462/pet:latest
